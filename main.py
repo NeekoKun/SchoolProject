@@ -5,7 +5,7 @@ import random
 import pygame
 
 class Simulation:
-    def __init__(self, size=(1920, 1200), points = 10, ants = 10, pheromone_weight = 10, pheromone_evaporation = 0.9, point_radius = 10, ant_radius = 5):
+    def __init__(self, size=(1920, 1080), points = 50, ants = 40, pheromone_weight = 10, pheromone_evaporation = 0.9, point_radius = 10, ant_radius = 5):
         pygame.init()
         self.screen = pygame.display.set_mode(size)
 
@@ -36,7 +36,7 @@ class Simulation:
             ## Lay the pheromone trails
             for ant in self.ants:
                 for start, destination in ant.get_neighbouring_pairs():
-                    self.points[start.id].pheromone[destination.id] += ((len(self.points) * self.width * self.height) / 10000000 * ant.journey_length) ** 2
+                    self.points[start.id].pheromone[destination.id] += (len(self.points) * self.width * self.height) / (ant.journey_length) ** 2 #TODO: tune settings
 
             ## Evaporate pheromone
             for point in self.points:
@@ -92,7 +92,8 @@ class Simulation:
             for pheromone in point.pheromone:
                 pygame.draw.line(self.screen, self.pheromone_color, (point.x, point.y), (self.points[pheromone].x, self.points[pheromone].y), int(point.pheromone[pheromone]))
         
-        for point in self.points:
+        pygame.draw.circle(self.screen, (255, 0, 0), (self.points[0].x, self.points[0].y), self.point_radius)
+        for point in self.points[1:]:
             # Draw points
             pygame.draw.circle(self.screen, self.point_color, (point.x, point.y), self.point_radius)
 
@@ -100,11 +101,10 @@ class Simulation:
         best_ant = sorted(self.ants, key=lambda x: x.journey_length)[0]
         for i in range(len(best_ant.visited_points) - 1):
             pygame.draw.line(self.screen, self.ant_color, (best_ant.visited_points[i].x, best_ant.visited_points[i].y), (best_ant.visited_points[i+1].x, best_ant.visited_points[i+1].y), 5)
-            
-
+        
         """
+        # Draw ants
         for ant in self.ants:
-            # Draw ant
             pygame.draw.circle(self.screen, self.ant_color, (ant.current_point.x, ant.current_point.y), self.ant_radius)
         """
         pygame.display.flip()
