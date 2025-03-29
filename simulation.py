@@ -81,7 +81,7 @@ class ColonySim:
         # Generate random map
         for x, row in enumerate(self.background_grid):
             for y, _ in enumerate(row):
-                if random.randint(0, 100) < 45 or x == 0 or x == self.WIDTH-1 or y == 0 or y == self.HEIGHT-1:
+                if random.randint(0, 100) < 45:
                     self.background_grid[y][x] = 1
 
         if display:
@@ -94,55 +94,52 @@ class ColonySim:
         start_flood_time = time.time()
 
         ## Flood fill to prevent isolated areas
+        visited = np.zeros(self.SIZE)
+        stack = []
 
-        while True:
-            visited = np.zeros(self.SIZE)
-            stack = []
+        # Generate starter point to flood fill
+        stack.append((0, 0))
+        while self.background_grid[stack[-1][0]][stack[-1][1]] == 1:
+            stack.pop()
+            stack.append((random.randint(0, self.WIDTH-1), random.randint(0, self.HEIGHT-1)))
 
-            # Generate starter point to flood fill
-            stack.append((0, 0))
-            while self.background_grid[stack[-1][0]][stack[-1][1]] == 1:
-                stack.pop()
-                stack.append((random.randint(0, self.WIDTH-1), random.randint(0, self.HEIGHT-1)))
+        cycle = 0
+        # Flood fill following stack order
+        while len(stack) > 0:
+            # Pop the last element
+            (x, y) = stack.pop()
 
-            cycle = 0
-            # Flood fill following stack order
-            while len(stack) > 0:
-                # Pop the last element
-                (x, y) = stack.pop()
+            # Skip if already visited
+            if visited[y][x] == 1:
+                continue
 
-                # Skip if already visited
-                if visited[y][x] == 1:
-                    continue
+            visited[y][x] = 1
 
-                visited[y][x] = 1
+            # Check if the cell is a wall
+            if x > 0 and visited[y][x-1] == 0 and self.background_grid[y][x-1] == 0:
+                stack.append((x-1, y))
+            if x < self.WIDTH-1 and visited[y][x+1] == 0 and self.background_grid[y][x+1] == 0:
+                stack.append((x+1, y))
+            if y > 0 and visited[y-1][x] == 0 and self.background_grid[y-1][x] == 0:
+                stack.append((x, y-1))
+            if y < self.HEIGHT-1 and visited[y+1][x] == 0 and self.background_grid[y+1][x] == 0:
+                stack.append((x, y+1))
 
-                # Check if the cell is a wall
-                if x > 0 and visited[y][x-1] == 0 and self.background_grid[y][x-1] == 0:
-                    stack.append((x-1, y))
-                if x < self.WIDTH-1 and visited[y][x+1] == 0 and self.background_grid[y][x+1] == 0:
-                    stack.append((x+1, y))
-                if y > 0 and visited[y-1][x] == 0 and self.background_grid[y-1][x] == 0:
-                    stack.append((x, y-1))
-                if y < self.HEIGHT-1 and visited[y+1][x] == 0 and self.background_grid[y+1][x] == 0:
-                    stack.append((x, y+1))
+            # Display for debugging purposes
+            if display and cycle % display_steps == 0:
+                # Display the background grid and the visited cells
+                self.display([(self.background_grid, (255, 255, 255)), (visited, (255, 0, 0))], squares = [(x, y)])
 
-                # Display for debugging purposes
-                if display and cycle % display_steps == 0:
-                    # Display the background grid and the visited cells
-                    self.display([(self.background_grid, (255, 255, 255)), (visited, (255, 0, 0))], squares = [(x, y)])
+            cycle += 1
 
-                cycle += 1
+        walls = self.background_grid.sum()
+        total = self.WIDTH * self.HEIGHT
+        logging.debug(f"Free area: {100 - (walls / total) * 100}%")
 
-            walls = self.background_grid.sum()
-            total = self.WIDTH * self.HEIGHT
-            logging.debug(f"Free area: {100 - (walls / total) * 100}%")
-
-            if 100 - (walls / total) * 100 < 40:
-                logging.debug("Filled area below 45%, retrying")
-            else:
-                break
-
+        if 100 - (walls / total) * 100 < 40:
+            logging.debug("Filled area below 45%, retrying")
+        else:
+            return False
 
         end_flood_time = time.time()
 
