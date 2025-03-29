@@ -1,3 +1,4 @@
+import scipy.ndimage as ndimage
 import numpy as np
 import logging
 import random
@@ -18,7 +19,8 @@ class ColonySim:
         logging.debug(f"Seed: {seed}")
         self.background_grid = np.zeros(self.SIZE)
 
-    def convolute(self, matrix, kernel):
+    def convolute(self, m, kernel, exterior=1):
+        matrix = m.copy()
         kernel_height, kernel_width = kernel.shape
         matrix_height, matrix_width = matrix.shape
         output = np.zeros((matrix_height, matrix_width))
@@ -27,123 +29,123 @@ class ColonySim:
         if kernel_height % 2 == 0 or kernel_width % 2 == 0:
             raise ValueError("Kernel must have odd dimensions")
         
-        for i in range(kernel_height // 2, matrix_height - kernel_height // 2):
-            for j in range(kernel_width // 2, matrix_width - kernel_width // 2):
-                region = matrix[i - kernel_height // 2:i + kernel_height // 2 + 1, j - kernel_width // 2:j + kernel_width // 2 + 1]
+        # Actual convolution
+        padded_matrix = np.pad(matrix, ((kernel_height // 2, kernel_height // 2), (kernel_width // 2, kernel_width // 2)), constant_values=exterior)
+        for i in range(matrix_height):
+            for j in range(matrix_width):
+                region = padded_matrix[i:i + kernel_height, j:j + kernel_width]
                 output[i, j] = np.sum(region * kernel)
         
         return output
 
-    def generate_cave(self):
+    def cellular_automata(self, m, rules, iterations, display=False):
+        matrix = m.copy()
+        logging.debug(f"Applying cellular automata with rules: {rules} for {iterations} iterations")
+        # Apply rules to the matrix
+        for i in range(iterations):
+            logging.debug(f"Iteration {i+1}/{iterations}")
+            buffer = np.zeros(self.SIZE)
+            convolutions = {}
+
+            for rule in rules:
+                convolutions[rule] = self.convolute(matrix, np.ones((2*rule+1, 2*rule+1)))
+
+            for y in range(matrix.shape[0]):
+                for x in range(matrix.shape[1]):
+                    # Get rules
+                    
+                    for rule in rules:
+                        # Apply rules
+                        if rules[rule] < 0:
+                            # Invert the rule
+                            logging.info(f"Applying rule {rule} [{convolutions[rule][y][x]}] with value <= {-rules[rule]}")
+                            if convolutions[rule][y][x] <= -rules[rule]:
+                                buffer[y][x] = 1
+                        else:
+                            # Normal rule
+                            logging.info(f"Applying rule {rule} [{convolutions[rule][y][x]}] with value >= {rules[rule]}")
+                            if convolutions[rule][y][x] >= rules[rule]:
+                                buffer[y][x] = 1
+
+            # Update the matrix
+            matrix = buffer.copy()
+
+            if display:
+                self.display([(matrix, (255, 255, 255))])
+                pygame.time.wait(500)
+
+        return matrix
+
+
+    def generate_cave(self, display=False, display_steps=10):
         # Generate random map
         for x, row in enumerate(self.background_grid):
             for y, _ in enumerate(row):
                 if random.randint(0, 100) < 45 or x == 0 or x == self.WIDTH-1 or y == 0 or y == self.HEIGHT-1:
                     self.background_grid[y][x] = 1
 
-        # Apply cellular automata
-        for _ in range(4):
-            ## Rules:
-            # 1. If a cell has 5 or more walls around it, it stays a wall
-            # 2. If a cell has 2 or less walls around its 2 square neightbourhood, it becomes a wall
-
-            buffer = np.ones(self.SIZE)
-
-            # Get nieghtbour values through matrix convolution
-            n1 = self.convolute(self.background_grid, np.ones((3, 3)))
-            n2 = self.convolute(self.background_grid, np.ones((5, 5)))
-
-            # Apply rules
-            for y in range(1, self.HEIGHT-1):
-                for x in range(1, self.WIDTH-1):
-                    # Count walls around cell
-                    walls1 = n1[y][x]
-                    walls2 = n2[y][x]
-
-                    if walls1 >= 5 or walls2 <= 2:
-                        buffer[y][x] = 1
-                    else:
-                        buffer[y][x] = 0
-            
-            ## Update the background grid
-            self.background_grid = buffer.copy()
-
-            # Display for debugging purposes
-            self.display()
+        if display:
+            self.display([(self.background_grid, (255, 255, 255))])
             pygame.time.wait(500)
 
-        for _ in range(3):
-            ## Rules:
-            # 1. If a cell has 5 or more walls around it, it stays a wall
-
-            buffer = np.ones(self.SIZE)
-
-            # Get nieghtbour values through matrix convolution
-            n1 = self.convolute(self.background_grid, np.array([[0.5, 1, 0.5], [1, 1, 1], [0.5, 1, 0.5]]))
-
-            # Apply rules
-            for y in range(1, self.HEIGHT-1):
-                for x in range(1, self.WIDTH-1):
-                    # Count walls around cell
-                    walls1 = n1[y][x]
-                    walls2 = n2[y][x]
-
-                    if walls1 >= 4:
-                        buffer[y][x] = 1
-                    else:
-                        buffer[y][x] = 0
-            
-            ## Update the background grid
-            self.background_grid = buffer.copy()
-
-            # Display for debugging purposes
-            self.display()
-            pygame.time.wait(500)
-
+        self.background_grid = self.cellular_automata(self.background_grid, {1: 5, 2:-2}, 4, display=display)        
+        self.background_grid = self.cellular_automata(self.background_grid, {1: 5}, 3, display=display)
 
         start_flood_time = time.time()
 
         ## Flood fill to prevent isolated areas
-        visited = np.zeros(self.SIZE)
-        stack = []
 
-        # Generate starter point to flood fill
-        stack.append((0, 0))
-        while self.background_grid[stack[-1][0]][stack[-1][1]] == 1:
-            stack.pop()
-            stack.append((random.randint(0, self.WIDTH-1), random.randint(0, self.HEIGHT-1)))
+        while True:
+            visited = np.zeros(self.SIZE)
+            stack = []
 
-        cycle = 0
-        # Flood fill following stack order
-        while len(stack) > 0:
-            # Pop the last element
-            (x, y) = stack.pop(0)
+            # Generate starter point to flood fill
+            stack.append((0, 0))
+            while self.background_grid[stack[-1][0]][stack[-1][1]] == 1:
+                stack.pop()
+                stack.append((random.randint(0, self.WIDTH-1), random.randint(0, self.HEIGHT-1)))
 
-            # Skip if already visited
-            if visited[y][x] == 1:
-                continue
+            cycle = 0
+            # Flood fill following stack order
+            while len(stack) > 0:
+                # Pop the last element
+                (x, y) = stack.pop()
 
-            visited[y][x] = 1
+                # Skip if already visited
+                if visited[y][x] == 1:
+                    continue
 
-            # Check if the cell is a wall
-            if x > 0 and visited[y][x-1] == 0 and self.background_grid[y][x-1] == 0:
-                stack.append((x-1, y))
-            if x < self.WIDTH-1 and visited[y][x+1] == 0 and self.background_grid[y][x+1] == 0:
-                stack.append((x+1, y))
-            if y > 0 and visited[y-1][x] == 0 and self.background_grid[y-1][x] == 0:
-                stack.append((x, y-1))
-            if y < self.HEIGHT-1 and visited[y+1][x] == 0 and self.background_grid[y+1][x] == 0:
-                stack.append((x, y+1))
+                visited[y][x] = 1
 
-            # Display for debugging purposes
-            if cycle % 10 == 0:
-                # Display the background grid and the visited cells
-                self.display([(self.background_grid, (255, 255, 255)), (visited, (255, 0, 0))], squares = [(x, y)])
+                # Check if the cell is a wall
+                if x > 0 and visited[y][x-1] == 0 and self.background_grid[y][x-1] == 0:
+                    stack.append((x-1, y))
+                if x < self.WIDTH-1 and visited[y][x+1] == 0 and self.background_grid[y][x+1] == 0:
+                    stack.append((x+1, y))
+                if y > 0 and visited[y-1][x] == 0 and self.background_grid[y-1][x] == 0:
+                    stack.append((x, y-1))
+                if y < self.HEIGHT-1 and visited[y+1][x] == 0 and self.background_grid[y+1][x] == 0:
+                    stack.append((x, y+1))
 
-            cycle += 1
+                # Display for debugging purposes
+                if display and cycle % display_steps == 0:
+                    # Display the background grid and the visited cells
+                    self.display([(self.background_grid, (255, 255, 255)), (visited, (255, 0, 0))], squares = [(x, y)])
+
+                cycle += 1
+
+            walls = self.background_grid.sum()
+            total = self.WIDTH * self.HEIGHT
+            logging.debug(f"Free area: {100 - (walls / total) * 100}%")
+
+            if 100 - (walls / total) * 100 < 40:
+                logging.debug("Filled area below 45%, retrying")
+            else:
+                break
 
 
         end_flood_time = time.time()
+
         logging.debug(f"Flood fill took {end_flood_time - start_flood_time} seconds")
 
         # Remove isolated areas
@@ -153,9 +155,23 @@ class ColonySim:
                     self.background_grid[y][x] = 1
 
         # Get current free area percentage
-        walls = self.background_grid.sum()
-        total = self.WIDTH * self.HEIGHT
-        logging.debug(f"Free area: {100 - (walls / total) * 100}%")
+
+        return self.background_grid
+
+    def generate_food_source(self):
+        ## Generate distance map from the walls of the cave
+
+        # Generate gaussian kernel
+        kernel_size = 11
+        kernel_deviation = 3
+        kernel = np.zeros((kernel_size, kernel_size))
+        kernel[kernel_size//2, kernel_size//2] = 1
+        kernel = ndimage.gaussian_filter(kernel, kernel_deviation)
+
+        distance_map = self.convolute(self.background_grid, kernel)
+        while True:
+            self.display([(distance_map, (0, 255, 0)), (self.background_grid, (255, 255, 255))])
+        
 
     def iter_simulation(self):
         pass
@@ -182,8 +198,6 @@ class ColonySim:
         
         pygame.display.flip()
 
-
-
     def run(self):
         while True:
             for event in pygame.event.get():
@@ -197,7 +211,9 @@ class ColonySim:
 
 sim = ColonySim(seed=2)
 logging.debug("Starting cave Generation")
-sim.generate_cave()
+sim.generate_cave(display=True, display_steps=1)
+#sim.generate_food_source()
+#sim.generate_colony()
 logging.debug("Cave Generation complete")
 logging.debug("Starting simulation")
 sim.run()
