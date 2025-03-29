@@ -7,12 +7,15 @@ import time
 logging.basicConfig(level=logging.DEBUG)
 
 class ColonySim:
-    def __init__(self):
+    def __init__(self, seed=None):
         self.SIZE = self.WIDTH, self.HEIGHT = 100, 100
         self.CELL_SIZE = self.CELL_WIDTH, self.CELL_HEIGHT = 10, 10
 
         pygame.display.init()
         self.screen = pygame.display.set_mode((self.WIDTH * self.CELL_WIDTH, self.HEIGHT*self.CELL_HEIGHT))
+        
+        random.seed(seed) if seed else random.seed()
+        logging.debug(f"Seed: {seed}")
         self.background_grid = np.zeros(self.SIZE)
 
     def generate_cave(self):
@@ -68,7 +71,7 @@ class ColonySim:
         # Flood fill following stack order
         while len(stack) > 0:
             # Pop the last element
-            (x, y) = stack.pop()
+            (x, y) = stack.pop(0)
 
             # Skip if already visited
             if visited[y][x] == 1:
@@ -87,7 +90,7 @@ class ColonySim:
                 stack.append((x, y+1))
 
             # Display for debugging purposes
-            #self.display([(self.background_grid, (255, 255, 255)), (visited, (255, 0, 0))], squares = [(x, y)])
+            self.display([(self.background_grid, (255, 255, 255)), (visited, (255, 0, 0))], squares = [(x, y)])
 
         end_flood_time = time.time()
         logging.debug(f"Flood fill took {end_flood_time - start_flood_time} seconds")
@@ -108,10 +111,10 @@ class ColonySim:
 
     def display(self, matrix_list=None, squares=[]):
         self.screen.fill((0, 0, 0))
-
+        ## Generate matrix to display
         if matrix_list is None:
             matrix_list = [(self.background_grid, (255, 255, 255))]
-
+        
         for matrix, color in matrix_list:
             for y, row in enumerate(matrix):
                 for x, cell in enumerate(row):
@@ -125,6 +128,7 @@ class ColonySim:
             x, y = square
             rect = pygame.Rect(x * self.CELL_WIDTH, y * self.CELL_HEIGHT, self.CELL_WIDTH, self.CELL_HEIGHT)
             pygame.draw.rect(self.screen, (0, 0, 255), rect)
+        
         pygame.display.flip()
 
 
@@ -140,7 +144,7 @@ class ColonySim:
             self.iter_simulation()
             self.display()
 
-sim = ColonySim()
+sim = ColonySim(seed=2)
 logging.debug("Starting cave Generation")
 sim.generate_cave()
 logging.debug("Cave Generation complete")
