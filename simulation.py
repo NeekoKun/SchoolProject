@@ -2,6 +2,7 @@ import numpy as np
 import logging
 import random
 import pygame
+import time
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -52,6 +53,8 @@ class ColonySim:
             self.display()
             pygame.time.wait(500)
 
+        start_flood_time = time.time()
+
         ## Flood fill to prevent isolated areas
         visited = np.zeros(self.SIZE)
         stack = []
@@ -64,9 +67,16 @@ class ColonySim:
 
         # Flood fill following stack order
         while len(stack) > 0:
+            # Pop the last element
             (x, y) = stack.pop()
+
+            # Skip if already visited
+            if visited[y][x] == 1:
+                continue
+
             visited[y][x] = 1
 
+            # Check if the cell is a wall
             if x > 0 and visited[y][x-1] == 0 and self.background_grid[y][x-1] == 0:
                 stack.append((x-1, y))
             if x < self.WIDTH-1 and visited[y][x+1] == 0 and self.background_grid[y][x+1] == 0:
@@ -76,8 +86,11 @@ class ColonySim:
             if y < self.HEIGHT-1 and visited[y+1][x] == 0 and self.background_grid[y+1][x] == 0:
                 stack.append((x, y+1))
 
-            self.display([(self.background_grid, (255, 255, 255)), (visited, (255, 0, 0))])
-            self.display_square(x, y, (100, 100, 255))
+            # Display for debugging purposes
+            #self.display([(self.background_grid, (255, 255, 255)), (visited, (255, 0, 0))], squares = [(x, y)])
+
+        end_flood_time = time.time()
+        logging.debug(f"Flood fill took {end_flood_time - start_flood_time} seconds")
 
         # Remove isolated areas
         for y in range(1, self.HEIGHT-1):
@@ -93,12 +106,7 @@ class ColonySim:
     def iter_simulation(self):
         pass
 
-    def display_square(self, x, y, color):
-        rect = pygame.Rect(x * self.CELL_WIDTH, y * self.CELL_HEIGHT, self.CELL_WIDTH, self.CELL_HEIGHT)
-        pygame.draw.rect(self.screen, color, rect)
-        pygame.display.flip
-
-    def display(self, matrix_list=None):
+    def display(self, matrix_list=None, squares=[]):
         self.screen.fill((0, 0, 0))
 
         if matrix_list is None:
@@ -112,6 +120,11 @@ class ColonySim:
                     rect = pygame.Rect(x * self.CELL_WIDTH, y * self.CELL_HEIGHT, self.CELL_WIDTH, self.CELL_HEIGHT)
                     cell_color = (cell * color[0], cell * color[1], cell * color[2])
                     pygame.draw.rect(self.screen, cell_color, rect)
+        
+        for square in squares:
+            x, y = square
+            rect = pygame.Rect(x * self.CELL_WIDTH, y * self.CELL_HEIGHT, self.CELL_WIDTH, self.CELL_HEIGHT)
+            pygame.draw.rect(self.screen, (0, 0, 255), rect)
         pygame.display.flip()
 
 
