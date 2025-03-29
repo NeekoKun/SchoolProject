@@ -18,6 +18,22 @@ class ColonySim:
         logging.debug(f"Seed: {seed}")
         self.background_grid = np.zeros(self.SIZE)
 
+    def convolute(self, matrix, kernel):
+        kernel_height, kernel_width = kernel.shape
+        matrix_height, matrix_width = matrix.shape
+        output = np.zeros((matrix_height, matrix_width))
+
+        # Check if kernel is odd
+        if kernel_height % 2 == 0 or kernel_width % 2 == 0:
+            raise ValueError("Kernel must have odd dimensions")
+        
+        for i in range(kernel_height // 2, matrix_height - kernel_height // 2):
+            for j in range(kernel_width // 2, matrix_width - kernel_width // 2):
+                region = matrix[i - kernel_height // 2:i + kernel_height // 2 + 1, j - kernel_width // 2:j + kernel_width // 2 + 1]
+                output[i, j] = np.sum(region * kernel)
+        
+        return output
+
     def generate_cave(self):
         # Generate random map
         for x, row in enumerate(self.background_grid):
@@ -26,35 +42,64 @@ class ColonySim:
                     self.background_grid[y][x] = 1
 
         # Apply cellular automata
-        for _ in range(5):
-            buffer = self.background_grid.copy()
+        for _ in range(4):
+            ## Rules:
+            # 1. If a cell has 5 or more walls around it, it stays a wall
+            # 2. If a cell has 2 or less walls around its 2 square neightbourhood, it becomes a wall
 
+            buffer = np.ones(self.SIZE)
+
+            # Get nieghtbour values through matrix convolution
+            n1 = self.convolute(self.background_grid, np.ones((3, 3)))
+            n2 = self.convolute(self.background_grid, np.ones((5, 5)))
+
+            # Apply rules
             for y in range(1, self.HEIGHT-1):
                 for x in range(1, self.WIDTH-1):
                     # Count walls around cell
-                    walls = 0
+                    walls1 = n1[y][x]
+                    walls2 = n2[y][x]
 
-                    # TODO: better the kernel system
-                    walls += self.background_grid[y+1][x+1]
-                    walls += self.background_grid[y+1][x]
-                    walls += self.background_grid[y+1][x-1]
-                    walls += self.background_grid[y][x+1]
-                    walls += self.background_grid[y][x]
-                    walls += self.background_grid[y][x-1]
-                    walls += self.background_grid[y-1][x+1]
-                    walls += self.background_grid[y-1][x]
-                    walls += self.background_grid[y-1][x-1]
-                
-                    if walls >= 5:
+                    if walls1 >= 5 or walls2 <= 2:
                         buffer[y][x] = 1
                     else:
                         buffer[y][x] = 0
             
+            ## Update the background grid
             self.background_grid = buffer.copy()
 
             # Display for debugging purposes
             self.display()
             pygame.time.wait(500)
+
+        for _ in range(3):
+            ## Rules:
+            # 1. If a cell has 5 or more walls around it, it stays a wall
+
+            buffer = np.ones(self.SIZE)
+
+            # Get nieghtbour values through matrix convolution
+            n1 = self.convolute(self.background_grid, np.array([[0.5, 1, 0.5], [1, 1, 1], [0.5, 1, 0.5]]))
+
+            # Apply rules
+            for y in range(1, self.HEIGHT-1):
+                for x in range(1, self.WIDTH-1):
+                    # Count walls around cell
+                    walls1 = n1[y][x]
+                    walls2 = n2[y][x]
+
+                    if walls1 >= 4:
+                        buffer[y][x] = 1
+                    else:
+                        buffer[y][x] = 0
+            
+            ## Update the background grid
+            self.background_grid = buffer.copy()
+
+            # Display for debugging purposes
+            self.display()
+            pygame.time.wait(500)
+
 
         start_flood_time = time.time()
 
@@ -68,6 +113,7 @@ class ColonySim:
             stack.pop()
             stack.append((random.randint(0, self.WIDTH-1), random.randint(0, self.HEIGHT-1)))
 
+        cycle = 0
         # Flood fill following stack order
         while len(stack) > 0:
             # Pop the last element
@@ -90,7 +136,12 @@ class ColonySim:
                 stack.append((x, y+1))
 
             # Display for debugging purposes
-            self.display([(self.background_grid, (255, 255, 255)), (visited, (255, 0, 0))], squares = [(x, y)])
+            if cycle % 10 == 0:
+                # Display the background grid and the visited cells
+                self.display([(self.background_grid, (255, 255, 255)), (visited, (255, 0, 0))], squares = [(x, y)])
+
+            cycle += 1
+
 
         end_flood_time = time.time()
         logging.debug(f"Flood fill took {end_flood_time - start_flood_time} seconds")
