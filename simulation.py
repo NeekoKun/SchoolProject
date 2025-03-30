@@ -18,7 +18,10 @@ class ColonySim:
         
         self.colors = json.load(open("colors.json"))
 
-        random.seed(seed) if seed else random.seed()
+        if seed is None:
+            seed = random.randint(0, 1000000)
+        random.seed(seed)
+
         logging.debug(f"Seed: {seed}")
         self.walls_grid = np.zeros(self.SIZE)
 
@@ -72,11 +75,10 @@ class ColonySim:
             matrix = buffer.copy()
 
             if display:
-                self.display([(matrix, (255, 255, 255))])
+                self.display([(matrix, self.colors["walls"])])
                 pygame.time.wait(500)
 
         return matrix
-
 
     def generate_cave(self, display=False, display_steps=10):
         # Generate random map
@@ -84,13 +86,15 @@ class ColonySim:
             for y, _ in enumerate(row):
                 if random.randint(0, 100) < 45:
                     self.walls_grid[y][x] = 1
+                else:
+                    self.walls_grid[y][x] = 0
 
         if display:
             self.display([(self.walls_grid, (255, 255, 255))])
             pygame.time.wait(500)
 
         self.walls_grid = self.cellular_automata(self.walls_grid, {1: 5, 2:-2}, 4, display=display)        
-        self.walls_grid = self.cellular_automata(self.walls_grid, {1: 5}, 3, display=display)
+        self.walls_grid = self.cellular_automata(self.walls_grid, {1: 5}, 4, display=display)
 
         start_flood_time = time.time()
 
@@ -163,40 +167,23 @@ class ColonySim:
             self.colony_location = location
         else:
             ## Generate distance map from the walls of the cave
+            distance_map = ndimage.distance_transform_edt(self.walls_grid == 0)
 
-            # Generate gaussian kernel
-            kernel_size = 11
-            kernel_deviation = 3
-            kernel = np.zeros((kernel_size, kernel_size))
-            kernel[kernel_size//2, kernel_size//2] = 1
-            kernel = ndimage.gaussian_filter(kernel, kernel_deviation)
-
-            distance_map = self.walls_grid.copy()
-
-            # Iteratively convolute the distance map
-            for _ in range(5):
-                distance_map = self.convolute(distance_map, kernel)
-                # Display the distance map
-                if display:
-                    self.display([(distance_map, (0, 255, 0)), (self.walls_grid, self.colors["walls"])]) # TODO: Remove in production
-                    pygame.time.wait(500)
+            # Normalize the distance map to the range [0, 1]
+            distance_map = distance_map / np.max(distance_map)
             
-            # Invert and Normalize the distance map
-            r_distance_map = 1 / distance_map
-            r_distance_map = r_distance_map / np.max(r_distance_map)
-
             # Display the distance map
             if display:
-                self.display([(r_distance_map, (0, 255, 0)), (self.walls_grid, self.colors["walls"])]) # TODO: Remove in production
+                self.display([(distance_map, (0, 255, 0)), (self.walls_grid, self.colors["walls"])]) # TODO: Remove in production
                 pygame.time.wait(500)
 
             # Find the maximum value in the distance map
             self.colony_location = [0, 0]
-            self.colony_location[1], self.colony_location[0] = np.unravel_index(np.argmax(r_distance_map), r_distance_map.shape)
+            self.colony_location[1], self.colony_location[0] = np.unravel_index(np.argmax(distance_map), distance_map.shape)
         
         # Display maximum distance point
         if display:
-            self.display([(r_distance_map, (0, 255, 0))], squares=[self.colony_location])
+            self.display([(distance_map, (0, 255, 0))], squares=[self.colony_location])
             pygame.time.wait(500)
         
         ## Generate colony
@@ -210,6 +197,75 @@ class ColonySim:
         if display:
             self.display([(self.colony_grid, self.colors["colony"]), (self.walls_grid, self.colors["walls"])], squares=[self.colony_location])
             pygame.time.wait(500)
+
+    def generate_food_source(self, amount, location=None, radius=5, display=False, counter=0):
+        # Check if there already is a food source
+        if not hasattr(self, "food_grid"):
+            self.food_grid = np.zeros(self.SIZE)
+
+        if location:
+            self.food_location = location
+        else:
+            # Generate distance map from colony
+            if hasattr(self, "colony_grid"):
+                colony_distance_map = ndimage.distance_transform_edt(self.colony_grid == 0)
+                # Normalize the distance map to the range [0, 1]
+                colony_distance_map = colony_distance_map / np.max(colony_distance_map)
+            else:
+                colony_distance_map = np.ones(self.SIZE)
+            # Display the distance map
+            if display:
+                self.display([(colony_distance_map, (0, 255, 0)), (self.walls_grid, self.colors["walls"])])
+                pygame.time.wait(500)
+
+            # Generate distance map from the walls of the cave and other food sources
+            walls_and_food = np.maximum(self.walls_grid, self.food_grid)
+            walls_distance_map = ndimage.distance_transform_edt(walls_and_food == 0)
+            # Normalize the distance map to the range [0, 1]
+            walls_distance_map = walls_distance_map / np.max(walls_distance_map)
+            # Display the distance map
+            if display:
+                self.display([(walls_distance_map, (0, 255, 0)), (self.walls_grid, self.colors["walls"])])
+                pygame.time.wait(500)
+
+            # Combine the distance maps
+            distance_map = np.where(colony_distance_map > 0.5, walls_distance_map, 0)
+            if display:
+                self.display([(distance_map, (0, 255, 0)), (self.walls_grid, self.colors["walls"])])
+                pygame.time.wait(500)
+
+            # Find the maximum value in the distance map
+            self.food_location = [0, 0]
+            self.food_location[1], self.food_location[0] = np.unravel_index(np.argmax(distance_map), distance_map.shape)
+
+            # Display maximum distance point
+            if display:
+                self.display([(distance_map, (0, 255, 0))], squares=[self.food_location])
+                pygame.time.wait(500)
+
+        # Display food location
+        if display:
+            self.display([(self.colony_grid, self.colors["colony"]), (self.walls_grid, self.colors["walls"])], squares=[self.food_location])
+            pygame.time.wait(500)
+        
+        ## Generate food source
+        for y in range(self.food_location[1] - radius, self.food_location[1] + radius):
+            for x in range(self.food_location[0] - radius, self.food_location[0] + radius):
+                if (x - self.food_location[0])**2 + (y - self.food_location[1])**2 < radius**2:
+                    if self.walls_grid[y][x] == 0:
+                        self.food_grid[y][x] = 1
+
+        counter += 1
+
+        # Display food source
+        if display:
+            self.display([(self.food_grid, self.colors["food"]), (self.colony_grid, self.colors["colony"]), (self.walls_grid, self.colors["walls"])], squares=[self.food_location])
+            pygame.time.wait(500)
+
+        if counter < amount:
+            # Generate food source again
+            self.generate_food_source(amount, location=None, radius=radius, display=display, counter=counter)
+
 
     def iter_simulation(self):
         pass
@@ -252,13 +308,14 @@ class ColonySim:
             self.display([
                 (self.walls_grid, self.colors["walls"]),
                 (self.colony_grid, self.colors["colony"]),
+                (self.food_grid, self.colors["food"])
             ])
 
-sim = ColonySim()
+sim = ColonySim(297947)
 logging.debug("Starting cave Generation")
-sim.generate_cave(display=False, display_steps=1)
+sim.generate_cave(display=True, display_steps=10)
 sim.generate_colony(display=True)
-#sim.generate_food_source()
+sim.generate_food_source(2, display=True)
 logging.debug("Cave Generation complete")
 logging.debug("Starting simulation")
 sim.run()
