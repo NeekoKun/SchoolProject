@@ -2,17 +2,19 @@ import numpy as np
 import random
 
 class Ant:
-    def __init__(self, coordinates, rotation=None, speed=10, vision_radius=50):
+    def __init__(self, coordinates, rotation=None, speed=10, vision_radius=50, radius=5):
+        
         self.location = coordinates
         self.has_food = False
         self.vision_radius = vision_radius
         self.rotation = rotation if rotation else random.uniform(0, 2 * np.pi)
         self.speed = speed
+        self.radius = radius
     
     def distance(self, other):
         return np.sqrt((self.location[0] - other[0]) ** 2 + (self.location[1] - other[1]) ** 2)
 
-    def move(self, food, colony, grid_size, home_pheromones, food_pheromones):
+    def move(self, food, food_radius, colony, colony_radius, grid_size, home_pheromones, food_pheromones):
         ## Rotate randomly
         if random.random() < 0.1:  # 10% chance to rotate randomly
             self.rotation += random.uniform(-np.pi / 4, np.pi / 4)
@@ -21,15 +23,12 @@ class Ant:
         ## Check if on food or on colony
         if not self.has_food:
             for food_location in food:
-                if self.distance(food_location) < 10: # Assuming a threshold for food collection
-                    self.location = food_location
-                    food.remove(food_location)
+                if self.distance(food_location) < food_radius + self.radius:
                     self.has_food = True
                     self.rotation += np.pi
                     return "Collected food"
         else:
-            if self.distance(colony) < 10: # Assuming a threshold for returning to the colony
-                self.location = colony
+            if self.distance(colony) < colony_radius + self.radius: 
                 self.has_food = False
                 self.rotation += np.pi
                 return "Deposited food"
