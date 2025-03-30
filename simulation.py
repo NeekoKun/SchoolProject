@@ -4,6 +4,7 @@ import logging
 import random
 import pygame
 import time
+import json
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -15,9 +16,11 @@ class ColonySim:
         pygame.display.init()
         self.screen = pygame.display.set_mode((self.WIDTH * self.CELL_WIDTH, self.HEIGHT*self.CELL_HEIGHT))
         
+        self.colors = json.load(open("colors.json"))
+
         random.seed(seed) if seed else random.seed()
         logging.debug(f"Seed: {seed}")
-        self.background_grid = np.zeros(self.SIZE)
+        self.walls_grid = np.zeros(self.SIZE)
 
     def convolute(self, m, kernel, exterior=1):
         matrix = m.copy()
@@ -58,12 +61,10 @@ class ColonySim:
                         # Apply rules
                         if rules[rule] < 0:
                             # Invert the rule
-                            logging.info(f"Applying rule {rule} [{convolutions[rule][y][x]}] with value <= {-rules[rule]}")
                             if convolutions[rule][y][x] <= -rules[rule]:
                                 buffer[y][x] = 1
                         else:
                             # Normal rule
-                            logging.info(f"Applying rule {rule} [{convolutions[rule][y][x]}] with value >= {rules[rule]}")
                             if convolutions[rule][y][x] >= rules[rule]:
                                 buffer[y][x] = 1
 
@@ -79,17 +80,17 @@ class ColonySim:
 
     def generate_cave(self, display=False, display_steps=10):
         # Generate random map
-        for x, row in enumerate(self.background_grid):
+        for x, row in enumerate(self.walls_grid):
             for y, _ in enumerate(row):
                 if random.randint(0, 100) < 45:
-                    self.background_grid[y][x] = 1
+                    self.walls_grid[y][x] = 1
 
         if display:
-            self.display([(self.background_grid, (255, 255, 255))])
+            self.display([(self.walls_grid, (255, 255, 255))])
             pygame.time.wait(500)
 
-        self.background_grid = self.cellular_automata(self.background_grid, {1: 5, 2:-2}, 4, display=display)        
-        self.background_grid = self.cellular_automata(self.background_grid, {1: 5}, 3, display=display)
+        self.walls_grid = self.cellular_automata(self.walls_grid, {1: 5, 2:-2}, 4, display=display)        
+        self.walls_grid = self.cellular_automata(self.walls_grid, {1: 5}, 3, display=display)
 
         start_flood_time = time.time()
 
@@ -99,7 +100,7 @@ class ColonySim:
 
         # Generate starter point to flood fill
         stack.append((0, 0))
-        while self.background_grid[stack[-1][0]][stack[-1][1]] == 1:
+        while self.walls_grid[stack[-1][0]][stack[-1][1]] == 1:
             stack.pop()
             stack.append((random.randint(0, self.WIDTH-1), random.randint(0, self.HEIGHT-1)))
 
@@ -116,30 +117,25 @@ class ColonySim:
             visited[y][x] = 1
 
             # Check if the cell is a wall
-            if x > 0 and visited[y][x-1] == 0 and self.background_grid[y][x-1] == 0:
+            if x > 0 and visited[y][x-1] == 0 and self.walls_grid[y][x-1] == 0:
                 stack.append((x-1, y))
-            if x < self.WIDTH-1 and visited[y][x+1] == 0 and self.background_grid[y][x+1] == 0:
+            if x < self.WIDTH-1 and visited[y][x+1] == 0 and self.walls_grid[y][x+1] == 0:
                 stack.append((x+1, y))
-            if y > 0 and visited[y-1][x] == 0 and self.background_grid[y-1][x] == 0:
+            if y > 0 and visited[y-1][x] == 0 and self.walls_grid[y-1][x] == 0:
                 stack.append((x, y-1))
-            if y < self.HEIGHT-1 and visited[y+1][x] == 0 and self.background_grid[y+1][x] == 0:
+            if y < self.HEIGHT-1 and visited[y+1][x] == 0 and self.walls_grid[y+1][x] == 0:
                 stack.append((x, y+1))
 
             # Display for debugging purposes
             if display and cycle % display_steps == 0:
                 # Display the background grid and the visited cells
-                self.display([(self.background_grid, (255, 255, 255)), (visited, (255, 0, 0))], squares = [(x, y)])
+                self.display([(self.walls_grid, self.colors["walls"]), (visited, (255, 0, 0))], squares = [(x, y)])
 
             cycle += 1
 
-        walls = self.background_grid.sum()
+        walls = self.walls_grid.sum()
         total = self.WIDTH * self.HEIGHT
         logging.debug(f"Free area: {100 - (walls / total) * 100}%")
-
-        if 100 - (walls / total) * 100 < 40:
-            logging.debug("Filled area below 45%, retrying")
-        else:
-            return False
 
         end_flood_time = time.time()
 
@@ -149,35 +145,83 @@ class ColonySim:
         for y in range(1, self.HEIGHT-1):
             for x in range(1, self.WIDTH-1):
                 if visited[y][x] == 0:
-                    self.background_grid[y][x] = 1
+                    self.walls_grid[y][x] = 1
 
         # Get current free area percentage
+        walls = self.walls_grid.sum()
+        total = self.WIDTH * self.HEIGHT
+        logging.debug(f"Free area: {100 - (walls / total) * 100}%")
 
-        return self.background_grid
+        if 100 - (walls / total) * 100 < 45:
+            logging.debug("Cave generation failed, regenerating")
+            self.generate_cave(display=display, display_steps=display_steps)
 
-    def generate_food_source(self):
-        ## Generate distance map from the walls of the cave
+        return self.walls_grid
 
-        # Generate gaussian kernel
-        kernel_size = 11
-        kernel_deviation = 3
-        kernel = np.zeros((kernel_size, kernel_size))
-        kernel[kernel_size//2, kernel_size//2] = 1
-        kernel = ndimage.gaussian_filter(kernel, kernel_deviation)
+    def generate_colony(self, location=None, radius=5, display=False):
+        if location:
+            self.colony_location = location
+        else:
+            ## Generate distance map from the walls of the cave
 
-        distance_map = self.convolute(self.background_grid, kernel)
-        while True:
-            self.display([(distance_map, (0, 255, 0)), (self.background_grid, (255, 255, 255))])
+            # Generate gaussian kernel
+            kernel_size = 11
+            kernel_deviation = 3
+            kernel = np.zeros((kernel_size, kernel_size))
+            kernel[kernel_size//2, kernel_size//2] = 1
+            kernel = ndimage.gaussian_filter(kernel, kernel_deviation)
+
+            distance_map = self.walls_grid.copy()
+
+            # Iteratively convolute the distance map
+            for _ in range(5):
+                distance_map = self.convolute(distance_map, kernel)
+                # Display the distance map
+                if display:
+                    self.display([(distance_map, (0, 255, 0)), (self.walls_grid, self.colors["walls"])]) # TODO: Remove in production
+                    pygame.time.wait(500)
+            
+            # Invert and Normalize the distance map
+            r_distance_map = 1 / distance_map
+            r_distance_map = r_distance_map / np.max(r_distance_map)
+
+            # Display the distance map
+            if display:
+                self.display([(r_distance_map, (0, 255, 0)), (self.walls_grid, self.colors["walls"])]) # TODO: Remove in production
+                pygame.time.wait(500)
+
+            # Find the maximum value in the distance map
+            self.colony_location = [0, 0]
+            self.colony_location[1], self.colony_location[0] = np.unravel_index(np.argmax(r_distance_map), r_distance_map.shape)
         
+        # Display maximum distance point
+        if display:
+            self.display([(r_distance_map, (0, 255, 0))], squares=[self.colony_location])
+            pygame.time.wait(500)
+        
+        ## Generate colony
+        self.colony_grid = np.zeros(self.SIZE)
+        for y in range(self.colony_location[1] - radius, self.colony_location[1] + radius):
+            for x in range(self.colony_location[0] - radius, self.colony_location[0] + radius):
+                if (x - self.colony_location[0])**2 + (y - self.colony_location[1])**2 < radius**2:
+                    if self.walls_grid[y][x] == 0:
+                        self.colony_grid[y][x] = 1
+        # Display colony
+        if display:
+            self.display([(self.colony_grid, self.colors["colony"]), (self.walls_grid, self.colors["walls"])], squares=[self.colony_location])
+            pygame.time.wait(500)
 
     def iter_simulation(self):
         pass
 
-    def display(self, matrix_list=None, squares=[]):
-        self.screen.fill((0, 0, 0))
+    def display(self, matrix_list=None, squares=[], background=None):
+        if background:
+            self.screen.fill(background)
+        else:
+            self.screen.fill(self.colors["background"])
         ## Generate matrix to display
         if matrix_list is None:
-            matrix_list = [(self.background_grid, (255, 255, 255))]
+            matrix_list = [(self.walls_grid, (255, 255, 255))]
         
         for matrix, color in matrix_list:
             for y, row in enumerate(matrix):
@@ -204,13 +248,17 @@ class ColonySim:
                     exit()
 
             self.iter_simulation()
-            self.display()
+            
+            self.display([
+                (self.walls_grid, self.colors["walls"]),
+                (self.colony_grid, self.colors["colony"]),
+            ])
 
-sim = ColonySim(seed=2)
+sim = ColonySim()
 logging.debug("Starting cave Generation")
-sim.generate_cave(display=True, display_steps=1)
+sim.generate_cave(display=False, display_steps=1)
+sim.generate_colony(display=True)
 #sim.generate_food_source()
-#sim.generate_colony()
 logging.debug("Cave Generation complete")
 logging.debug("Starting simulation")
 sim.run()
