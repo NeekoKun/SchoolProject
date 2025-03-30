@@ -1,4 +1,6 @@
+from concurrent.futures import ThreadPoolExecutor
 import scipy.ndimage as ndimage
+from utils import Ant
 import numpy as np
 import logging
 import random
@@ -34,6 +36,7 @@ class ColonySim:
         self.screen = pygame.display.set_mode((self.WIDTH * self.CELL_WIDTH, self.HEIGHT*self.CELL_HEIGHT))
         
         self.colors = json.load(open("colors.json"))
+        self.colony_food = 0
 
         if seed is None:
             seed = random.randint(0, 1000000)
@@ -42,7 +45,7 @@ class ColonySim:
         logging.debug(f"Seed: {seed}")
         self.walls_grid = np.zeros(self.SIZE)
 
-    def convolute(self, m, kernel, exterior=1):
+    def convolute(self, m: list[list], kernel: list[list], exterior=1):
         """
         Perform a 2D convolution operation on a matrix using a given kernel.
         Parameters:
@@ -170,8 +173,8 @@ class ColonySim:
             self.display([(self.walls_grid, (255, 255, 255))])
             pygame.time.wait(500)
 
-        self.walls_grid = self.cellular_automata(self.walls_grid, {1: 5, 2:-2}, 4, display=display)        
-        self.walls_grid = self.cellular_automata(self.walls_grid, {1: 5}, 4, display=display)
+        #self.walls_grid = self.cellular_automata(self.walls_grid, {1: 5, 2:-2}, 4, display=display)        
+        self.walls_grid = self.cellular_automata(self.walls_grid, {1: 5}, 5, display=display)
 
         start_flood_time = time.time()
 
@@ -278,8 +281,23 @@ class ColonySim:
 
             # Find the maximum value in the distance map
             self.colony_location = [0, 0]
-            self.colony_location[1], self.colony_location[0] = np.unravel_index(np.argmax(distance_map), distance_map.shape)
-        
+            # Mask out points within the radius distance from the border
+            border_mask = np.zeros_like(distance_map, dtype=bool)
+            border_mask[:radius, :] = True
+            border_mask[-radius:, :] = True
+            border_mask[:, :radius] = True
+            border_mask[:, -radius:] = True
+
+            # Apply the mask to the distance map
+            masked_distance_map = np.where(border_mask, 0, distance_map)
+
+            # Find the maximum value in the masked distance map
+            max_distance = np.argmax(masked_distance_map)
+
+            self.colony_location[1], self.colony_location[0] = np.unravel_index(max_distance, distance_map.shape)
+
+            logging.debug(f"Colony location: {self.colony_location}")
+
         # Display maximum distance point
         if display:
             self.display([(distance_map, (0, 255, 0))], squares=[self.colony_location])
@@ -365,6 +383,16 @@ class ColonySim:
                 self.display([(distance_map, (0, 255, 0)), (self.walls_grid, self.colors["walls"])])
                 pygame.time.wait(500)
 
+            # Mask out points within the radius distance from the border
+            border_mask = np.zeros_like(distance_map, dtype=bool)
+            border_mask[:radius, :] = True
+            border_mask[-radius:, :] = True
+            border_mask[:, :radius] = True
+            border_mask[:, -radius:] = True
+
+            # Apply the mask to the distance map
+            distance_map[border_mask] = 0
+
             # Find the maximum value in the distance map
             self.food_location = [0, 0]
             self.food_location[1], self.food_location[0] = np.unravel_index(np.argmax(distance_map), distance_map.shape)
@@ -397,11 +425,132 @@ class ColonySim:
             # Generate food source again
             self.generate_food_source(amount, location=None, radius=radius, display=display, counter=counter)
 
+    def scale_grid(self, scale: list[int], display=False):
+        if hasattr(self, "walls_grid"):
+            self.walls_grid = np.kron(self.walls_grid, np.ones((scale, scale)))
 
+        if hasattr(self, "colony_grid"):
+            self.colony_grid = np.kron(self.colony_grid, np.ones((scale, scale)))
+            self.colony_location = [self.colony_location[0] * scale + self.CELL_WIDTH//2, self.colony_location[1] * scale + self.CELL_HEIGHT//2]
+
+        if hasattr(self, "food_grid"):
+            self.food_grid = np.kron(self.food_grid, np.ones((scale, scale)))
+        
+        self.WIDTH = self.WIDTH * scale
+        self.HEIGHT = self.HEIGHT * scale
+        self.CELL_WIDTH = self.CELL_WIDTH // scale
+        self.CELL_HEIGHT = self.CELL_HEIGHT // scale
+        self.SIZE = self.WIDTH, self.HEIGHT
+        self.screen = pygame.display.set_mode((self.WIDTH * self.CELL_WIDTH, self.HEIGHT*self.CELL_HEIGHT))
+        
+        if display:
+            self.display([
+                (self.walls_grid, self.colors["walls"]),
+                (self.colony_grid, self.colors["colony"]),
+                (self.food_grid, self.colors["food"])
+            ])
+            pygame.time.wait(500)
+
+    def generate_ants(self, amount: int):
+        """
+        Generates a specified number of ants within the simulation environment.
+        Args:
+            amount (int): The number of ants to generate.
+        Behavior:
+            - Initializes an empty list of ants.
+            - For each ant, creates an instance of the Ant class and appends it to the list.
+        - The ants are initialized with the colony location.
+        - The colony location is determined by the `self.colony_location` attribute.
+        - The ants are stored in the `self.ants` attribute.
+        Notes:
+            - This method assumes that the `Ant` class is defined in the `utils` module.
+            - The `self.colony_location` attribute should be set before calling this method.
+        Raises:
+            ValueError: If the `amount` is less than or equal to zero.
+        Example:
+            sim = ColonySim()
+            sim.generate_colony()
+            sim.generate_ants(10)
+        """
+        if amount <= 0:
+            raise ValueError("Amount must be greater than 0")
+
+        self.search_pheromone_grid = np.zeros(self.SIZE)
+        self.food_pheromone_grid = np.zeros(self.SIZE)
+
+        self.ants = []
+        for i in range(amount):
+            ant = Ant(self.colony_location)
+            self.ants.append(ant)
+    
     def iter_simulation(self):
-        pass
+        if not hasattr(self, "ants"):
+            raise ValueError("Ants not generated yet")
 
-    def display(self, matrix_list=None, squares=[], background=None):
+        def process_ant(ant):
+            # Move the ant
+            result = ant.move(self.walls_grid, self.colony_grid, self.food_grid)
+            # If the ant found food, get food, update status and turn around
+            if result == "food" and not ant.has_food:
+                ant.has_food = True
+                ant.rotation += np.pi
+
+            # If the ant is at the colony, drop food and turn around
+            if result == "colony" and ant.has_food:
+                ant.has_food = False
+                ant.rotation += np.pi
+                self.colony_food += 1
+
+            if ant.has_food:
+                # Update food pheromone grid
+                self.food_pheromone_grid[ant.location[1]][ant.location[0]] = 1
+                ant.random_rotate(self.search_pheromone_grid)
+            else:
+                # Update search pheromone grid
+                self.search_pheromone_grid[ant.location[1]][ant.location[0]] = 1
+                ant.random_rotate(self.food_pheromone_grid)
+
+        with ThreadPoolExecutor() as executor:
+            executor.map(process_ant, self.ants)
+
+        # Decay pheromones
+        self.search_pheromone_grid *= 0.9
+        self.food_pheromone_grid *= 0.9
+    
+    """"
+    def iter_simulation(self):
+        if not hasattr(self, "ants"):
+            raise ValueError("Ants not generated yet")
+
+        for ant in self.ants:
+            # Move the ant
+            result = ant.move(self.walls_grid, self.colony_grid, self.food_grid)
+            # If the ant found food, get food, update status and turn around
+            if result == "food" and ant.has_food == False:
+                ant.has_food = True
+                ant.rotation += np.pi
+            
+            # If the ant is at the colony, drop food and turn around
+            if result == "colony" and ant.has_food == True:
+                ant.has_food = False
+                ant.rotation += np.pi
+                self.colony_food += 1
+            
+            if ant.has_food == True:
+                # Update food pheromone grid
+                self.food_pheromone_grid[ant.location[1]][ant.location[0]] = 1
+                ant.random_rotate(self.search_pheromone_grid)        
+            else:
+                # Update search pheromone grid
+                self.search_pheromone_grid[ant.location[1]][ant.location[0]] = 1
+                ant.random_rotate(self.food_pheromone_grid)
+
+        ## Decay pheromones
+        self.search_pheromone_grid *= 0.9
+        self.food_pheromone_grid *= 0.9
+    """
+
+    def display(self, matrix_list=None, squares=[], background=None, ants=True):
         """
         Renders a graphical representation of a grid-based simulation on the screen.
         Args:
@@ -441,11 +590,21 @@ class ColonySim:
                     cell_color = (cell * color[0], cell * color[1], cell * color[2])
                     pygame.draw.rect(self.screen, cell_color, rect)
         
+        if ants and hasattr(self, "ants"):
+            for ant in self.ants:
+                x, y = ant.location
+                if ant.has_food:
+                    pygame.draw.circle(self.screen, self.colors["busy_ants"], (x, y), 4)
+                else:
+                    pygame.draw.circle(self.screen, self.colors["empty_ants"], (x, y), 4)
+
         for square in squares:
             x, y = square
             rect = pygame.Rect(x * self.CELL_WIDTH, y * self.CELL_HEIGHT, self.CELL_WIDTH, self.CELL_HEIGHT)
             pygame.draw.rect(self.screen, (0, 0, 255), rect)
         
+
+
         pygame.display.flip()
 
     def run(self):
@@ -464,7 +623,9 @@ class ColonySim:
         Raises:
             SystemExit: Exits the program when the quit event is triggered.
         """
+        logging.debug("Running simulation")
 
+        # Main loop
         while True:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -477,5 +638,7 @@ class ColonySim:
             self.display([
                 (self.walls_grid, self.colors["walls"]),
                 (self.colony_grid, self.colors["colony"]),
-                (self.food_grid, self.colors["food"])
+                (self.food_grid, self.colors["food"]),
+                (self.search_pheromone_grid, self.colors["search_pheromone"]),
+                (self.food_pheromone_grid, self.colors["food_pheromone"])
             ])
