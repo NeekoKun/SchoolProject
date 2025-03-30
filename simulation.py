@@ -310,13 +310,3 @@ class ColonySim:
                 (self.colony_grid, self.colors["colony"]),
                 (self.food_grid, self.colors["food"])
             ])
-
-sim = ColonySim(297947)
-logging.debug("Starting cave Generation")
-sim.generate_cave(display=True, display_steps=10)
-sim.generate_colony(display=True)
-sim.generate_food_source(2, display=True)
-logging.debug("Cave Generation complete")
-logging.debug("Starting simulation")
-sim.run()
-
