@@ -10,6 +10,23 @@ logging.basicConfig(level=logging.DEBUG)
 
 class ColonySim:
     def __init__(self, seed=None):
+        """
+        Initializes the simulation environment.
+        Args:
+            seed (int, optional): A seed value for random number generation. If not provided, 
+                                  a random seed will be generated.
+        Attributes:
+            SIZE (tuple): The size of the simulation grid (WIDTH, HEIGHT).
+            WIDTH (int): The width of the simulation grid in cells.
+            HEIGHT (int): The height of the simulation grid in cells.
+            CELL_SIZE (tuple): The size of each cell in pixels (CELL_WIDTH, CELL_HEIGHT).
+            CELL_WIDTH (int): The width of each cell in pixels.
+            CELL_HEIGHT (int): The height of each cell in pixels.
+            screen (pygame.Surface): The Pygame display surface for rendering the simulation.
+            colors (dict): A dictionary of colors loaded from a JSON file.
+            walls_grid (numpy.ndarray): A 2D array representing the grid of walls in the simulation.
+        """
+        
         self.SIZE = self.WIDTH, self.HEIGHT = 100, 100
         self.CELL_SIZE = self.CELL_WIDTH, self.CELL_HEIGHT = 10, 10
 
@@ -26,6 +43,22 @@ class ColonySim:
         self.walls_grid = np.zeros(self.SIZE)
 
     def convolute(self, m, kernel, exterior=1):
+        """
+        Perform a 2D convolution operation on a matrix using a given kernel.
+        Parameters:
+            m (numpy.ndarray): The input matrix to be convolved.
+            kernel (numpy.ndarray): The convolution kernel, which must have odd dimensions.
+            exterior (int, optional): The value to use for padding the matrix edges. Defaults to 1.
+        Returns:
+            numpy.ndarray: The resulting matrix after applying the convolution.
+        Raises:
+            ValueError: If the kernel does not have odd dimensions.
+        Notes:
+            - The input matrix `m` is not modified; a copy is used for the operation.
+            - The kernel is applied to the matrix with zero-padding (or the specified `exterior` value) 
+              to handle edge cases.
+        """
+
         matrix = m.copy()
         kernel_height, kernel_width = kernel.shape
         matrix_height, matrix_width = matrix.shape
@@ -45,6 +78,28 @@ class ColonySim:
         return output
 
     def cellular_automata(self, m, rules, iterations, display=False):
+        """
+        Applies a cellular automaton to a given matrix based on specified rules and iterations.
+        Args:
+            m (numpy.ndarray): The input matrix to which the cellular automaton will be applied.
+            rules (dict): A dictionary where keys represent the rule size (radius) and values 
+                          represent the threshold for activation. Positive values indicate 
+                          activation when the sum of neighbors is greater than or equal to the 
+                          threshold, while negative values indicate activation when the sum of 
+                          neighbors is less than or equal to the absolute value of the threshold.
+            iterations (int): The number of iterations to apply the cellular automaton.
+            display (bool, optional): If True, displays the matrix after each iteration using 
+                                      the `self.display` method. Defaults to False.
+        Returns:
+            numpy.ndarray: The resulting matrix after applying the cellular automaton for the 
+                           specified number of iterations.
+        Notes:
+            - The method uses a convolution operation to calculate the sum of neighbors for 
+              each cell based on the rule size.
+            - The `self.display` method is used for visualization if `display` is set to True.
+            - The `self.colors["walls"]` is used for coloring during visualization.
+        """
+
         matrix = m.copy()
         logging.debug(f"Applying cellular automata with rules: {rules} for {iterations} iterations")
         # Apply rules to the matrix
@@ -81,6 +136,28 @@ class ColonySim:
         return matrix
 
     def generate_cave(self, display=False, display_steps=10):
+        """
+        Generates a cave-like structure using a combination of random initialization, 
+        cellular automata, and flood fill to ensure connectivity.
+        Args:
+            display (bool, optional): If True, displays the cave generation process 
+                visually for debugging purposes. Defaults to False.
+            display_steps (int, optional): The number of steps between visual updates 
+                when `display` is True. Defaults to 10.
+        Returns:
+            numpy.ndarray: A 2D grid representing the generated cave, where 1 indicates 
+            a wall and 0 indicates free space.
+        Notes:
+            - The cave is initialized with a random distribution of walls and free spaces.
+            - Cellular automata rules are applied to refine the cave structure.
+            - A flood fill algorithm ensures there are no isolated areas, and all free 
+              spaces are connected.
+            - If the resulting cave has less than 45% free area, the generation process 
+              is repeated recursively.
+            - Debugging information, such as free area percentage and flood fill duration, 
+              is logged.
+        """
+
         # Generate random map
         for x, row in enumerate(self.walls_grid):
             for y, _ in enumerate(row):
@@ -163,6 +240,28 @@ class ColonySim:
         return self.walls_grid
 
     def generate_colony(self, location=None, radius=5, display=False):
+        """
+        Generates a colony within the simulation environment.
+        This function determines the location of the colony either based on a given
+        location or by finding the point farthest from the walls of the cave. It then
+        creates a circular colony grid centered at the chosen location with a specified
+        radius. Optionally, the process can be visualized.
+        Args:
+            location (list or tuple, optional): The (x, y) coordinates of the colony's 
+                location. If not provided, the location is determined automatically.
+            radius (int, optional): The radius of the colony. Defaults to 5.
+            display (bool, optional): Whether to display the process of colony generation.
+                Defaults to False.
+        Side Effects:
+            - Updates `self.colony_location` with the chosen colony location.
+            - Updates `self.colony_grid` with the generated colony grid.
+        Notes:
+            - The function uses a distance transform to find the point farthest from
+              the walls if no location is provided.
+            - The visualization is intended for debugging and should be removed in
+              production.
+        """
+        
         if location:
             self.colony_location = location
         else:
@@ -199,6 +298,38 @@ class ColonySim:
             pygame.time.wait(500)
 
     def generate_food_source(self, amount, location=None, radius=5, display=False, counter=0):
+        """
+        Generates food sources in the simulation environment.
+        This method creates food sources within the simulation grid. It ensures that
+        food sources are placed at appropriate locations based on distance maps and
+        avoids overlapping with walls or existing food sources.
+        Args:
+            amount (int): The total number of food sources to generate.
+            location (tuple, optional): A specific (x, y) coordinate for the food source.
+                If None, the location is determined based on distance maps. Defaults to None.
+            radius (int, optional): The radius of the food source area. Defaults to 5.
+            display (bool, optional): Whether to visually display the process of generating
+                food sources. Defaults to False.
+            counter (int, optional): Internal counter to track the number of food sources
+                generated. Defaults to 0.
+        Behavior:
+            - If `location` is provided, the food source is generated at the specified
+              location.
+            - If `location` is not provided, distance maps are used to determine an
+              optimal location for the food source.
+            - The method ensures that food sources do not overlap with walls or other
+              obstacles.
+            - If `display` is True, intermediate steps and the final food source
+              placement are visually displayed.
+        Notes:
+            - This method is recursive and will continue generating food sources until
+              the specified `amount` is reached.
+            - The `counter` argument is used internally to track the recursion depth
+              and should not be manually set when calling the method.
+        Raises:
+            ValueError: If the specified `amount` is less than or equal to zero.
+        """
+
         # Check if there already is a food source
         if not hasattr(self, "food_grid"):
             self.food_grid = np.zeros(self.SIZE)
@@ -271,6 +402,28 @@ class ColonySim:
         pass
 
     def display(self, matrix_list=None, squares=[], background=None):
+        """
+        Renders a graphical representation of a grid-based simulation on the screen.
+        Args:
+            matrix_list (list of tuples, optional): A list of tuples where each tuple contains a 2D matrix 
+                (list of lists) and a color tuple (R, G, B). Each matrix represents a grid to be displayed, 
+                and the color tuple determines the base color for the cells in the matrix. Defaults to 
+                [(self.walls_grid, (255, 255, 255))] if not provided.
+            squares (list of tuples, optional): A list of (x, y) coordinates representing specific cells 
+                to be highlighted in blue. Defaults to an empty list.
+            background (tuple, optional): An RGB color tuple (R, G, B) to fill the screen background. 
+                If not provided, the default background color from `self.colors["background"]` is used.
+        Behavior:
+            - Fills the screen with the specified or default background color.
+            - Iterates through the provided matrices in `matrix_list` and renders each cell with its 
+              corresponding color.
+            - Highlights specific cells in `squares` with a blue color.
+            - Updates the display to reflect the changes.
+        Note:
+            This function assumes that `self.screen`, `self.CELL_WIDTH`, `self.CELL_HEIGHT`, and 
+            `self.colors` are properly initialized attributes of the class.
+        """
+
         if background:
             self.screen.fill(background)
         else:
@@ -296,6 +449,22 @@ class ColonySim:
         pygame.display.flip()
 
     def run(self):
+        """
+        Executes the main loop of the simulation.
+        This method continuously processes events, updates the simulation state,
+        and renders the simulation display. It listens for user input to quit
+        the simulation and ensures proper cleanup of resources.
+        Steps:
+        1. Listens for Pygame events, such as quitting the application.
+        2. Calls `self.iter_simulation()` to update the simulation state.
+        3. Calls `self.display()` to render the simulation grids with their
+           respective colors.
+        Note:
+            This method runs indefinitely until the user quits the application.
+        Raises:
+            SystemExit: Exits the program when the quit event is triggered.
+        """
+
         while True:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
