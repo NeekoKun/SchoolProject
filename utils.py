@@ -1,10 +1,11 @@
 import numpy as np
 
 class Ant:
-    def __init__(self, current_point):
+    def __init__(self, current_point, balls):
         self.journey_length = 0
         self.current_point = current_point
         self.visited_points = [current_point]
+        self.balls = "bigballs"
 
     def move_to(self, point):
         self.journey_length += self.current_point.distance(point.coors)
