@@ -1,9 +1,0 @@
-{
-    "colony": [182,159,102],
-    "walls": [64,41,5],
-    "background": [234,208,168],
-    "food": [11, 110, 2],
-    "ants": [18, 18, 18],
-    "search_pheromone": [194, 42, 16],
-    "food_pheromone": [60, 230, 68]
-}
