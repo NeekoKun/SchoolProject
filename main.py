@@ -5,8 +5,11 @@ SIZE = WIDTH, HEIGHT = 1000, 1000
 
 RANGE = (-10, 10)
 
+## Colors
+background_color = (10, 10, 10)
+
 point_base_color = (255, 0, 0)
-point_fast_color = (255, 255, 255)
+point_fast_color = (0, 0, 255)
 
 point_r_diff = point_fast_color[0] - point_base_color[0]
 point_g_diff = point_fast_color[1] - point_base_color[1]
@@ -24,6 +27,7 @@ screen = pygame.display.set_mode(SIZE)
 pygame.display.set_caption("Differential Equation Renderer")
 clock = pygame.time.Clock()
 point_count = 1000
+screen.fill(background_color)
 
 points = np.random.rand(point_count, 2) * (RANGE[1] - RANGE[0]) + RANGE[0]
 tracking_points = []
@@ -45,7 +49,7 @@ def update_tracking_points(in_points):
 def display(in_points, new_in_points):
 
     surface = pygame.Surface(SIZE, pygame.SRCALPHA)
-    surface.fill((0, 0, 0, int(0.1 * 255)))
+    surface.fill((background_color[0], background_color[1], background_color[2], int(0.05 * 255)))
     screen.blit(surface, (0, 0))
 
 
