@@ -7,13 +7,14 @@ RANGE = [10, 10]
 ORIGIN = [0, 0]
 PADDING = (1, 1)
 dt = 0.01
+reset_probability = 0.1
 
 for i in RANGE:
     if i < 0:
         raise ValueError("RANGE must be positive")
 
 ## Colors
-axes_color = (255, 255, 255)
+axes_color = (200, 200, 200)
 
 background_color = (10, 10, 10)
 point_base_color = (255, 0, 0)
@@ -28,8 +29,8 @@ def equation(x, y, dx, dy):
     global dt
     d2y = 0
     d2x = 0
-    dy = x-y
-    dx = x+y
+    dy = x
+    dx = -y
     dy += d2y * dt
     dx += d2x * dt
     return np.array([x + dx*dt, y + dy*dt, dx, dy])
@@ -84,7 +85,7 @@ def display(in_points, new_in_points):
     background_layer.blit(dimming_surface, (0, 0))
 
     for point, new_point in zip(in_points, new_in_points):
-        coors1, coors2, color = get_draw_data(point, new_point)
+        coors1, coors2, color = get_draw_data(point, new_point) # TODO: Parallelize this
         if (color != point_base_color).any():
             pygame.draw.line(background_layer, color, coors1, coors2, 1)
 
@@ -144,7 +145,10 @@ def display_axes():
         if i != 0:
             text = tick_font.render(str(i), True, axes_color)
             text_rect = text.get_rect(center=(coors[0], coors[1] + 10))
-            axes_layer.blit(text, (coors[0] - text_rect.width / 2, coors[1] - 30))
+            if ax_height < HEIGHT / 2:
+                axes_layer.blit(text, (coors[0] - text_rect.width / 2, ax_height + 30))
+            else:
+                axes_layer.blit(text, (coors[0] - text_rect.width / 2, ax_height - 30))
 
     for i in y_tick_coordinates: # Calculate y axis ticks
         coors = coors_to_screen([0, i])
@@ -152,10 +156,20 @@ def display_axes():
         if i != 0:
             text = tick_font.render(str(i), True, axes_color)
             text_rect = text.get_rect(center=(coors[0] + 10, coors[1]))
-            axes_layer.blit(text, (coors[0] + 20, coors[1] - text_rect.height / 2))
+            if ax_width > WIDTH / 2:
+                axes_layer.blit(text, (ax_width - text_rect.width - 20, coors[1] - text_rect.height / 2))
+            else:
+                axes_layer.blit(text, (ax_width + 20, coors[1] - text_rect.height / 2))
 
     zero_text = tick_font.render("0", True, axes_color)
-    axes_layer.blit(zero_text, (ax_width + 20, ax_height - 30))
+    if ax_width > WIDTH / 2 and ax_height < HEIGHT / 2:
+        axes_layer.blit(zero_text, (ax_width - zero_text.get_width() - 20, ax_height + 30))
+    elif ax_width > WIDTH / 2 and ax_height > HEIGHT / 2:
+        axes_layer.blit(zero_text, (ax_width - zero_text.get_width() - 20, ax_height - 30))
+    elif ax_width < WIDTH / 2 and ax_height < HEIGHT / 2:
+        axes_layer.blit(zero_text, (ax_width + 20, ax_height + 30))
+    elif ax_width < WIDTH / 2 and ax_height > HEIGHT / 2:   
+        axes_layer.blit(zero_text, (ax_width + 20, ax_height - 30))
 
 def add_point(x, y):
     coors = [np.array([x, y, 0, 0])]
@@ -172,16 +186,14 @@ while True:
             pygame.quit()
             exit()
         if event.type == pygame.MOUSEBUTTONDOWN:
-            if event.button == 1 and pygame.key.get_pressed()[pygame.K_LSHIFT]: # LMB + Shift: Rudimentary panning
-                x0, y0 = pygame.mouse.get_pos()
-
-            elif event.button == 1:
+            if event.button == 1:
                 x, y = pygame.mouse.get_pos()
                 x = (x / WIDTH) * RANGE[0] + ORIGIN[0]
                 y = ((HEIGHT - y) / HEIGHT) * RANGE[1] + ORIGIN[1]
-                print(x, y)
                 add_point(x, y)
-            if event.button == 4: # Scroll Up: Rudimentary zoom in TODO: Scroll towards mouse position
+            if event.button == 2: # Middle Mouse Button: Panning
+                x0, y0 = pygame.mouse.get_pos()
+            if event.button == 4: # Scroll Up: Zoom in
                 """
                 Zoom In:
                 The Range beecomes 90% of the original range
@@ -191,7 +203,7 @@ while True:
                 ORIGIN[1] += (RANGE[1] / 10) * ((HEIGHT - zoom_y) / HEIGHT)
                 RANGE = [RANGE[0] * 0.9, RANGE[1] * 0.9]
                 moved = True
-            if event.button == 5: # Scroll Down: Rudimentary zoom out TODO: Scroll towards mouse position
+            if event.button == 5: # Scroll Down: Zoom out
                 """
                 Zoom In:
                 The Range beecomes 110% of the original range
@@ -202,9 +214,9 @@ while True:
                 RANGE = [RANGE[0] * 1.1, RANGE[1] * 1.1]
                 moved = True
         if event.type == pygame.MOUSEBUTTONUP:
-            if event.button == 1:
+            if event.button == 2:
                 x0, y0 = 0, 0
-        if pygame.mouse.get_pressed()[0] and pygame.key.get_pressed()[pygame.K_LSHIFT]: # LMB + Shift: Rudimentary panning
+        if pygame.mouse.get_pressed()[1]: # LMB + Shift: Rudimentary panning
             x, y = pygame.mouse.get_pos()
             if x0 != 0 or y0 != 0:
                 x_shift = (x - x0) / WIDTH * RANGE[0]
@@ -218,7 +230,7 @@ while True:
 
     # Check if points are out of bounds
     for i in range(point_count):
-        if points[i][0] < ORIGIN[0] - PADDING[0] or points[i][0] > ORIGIN[0] + RANGE[1] + PADDING[0]  or points[i][1] < ORIGIN[1] - PADDING[1] or points[i][1] > ORIGIN[1] + RANGE[1] + PADDING[1]:
+        if points[i][0] < ORIGIN[0] - PADDING[0] or points[i][0] > ORIGIN[0] + RANGE[1] + PADDING[0]  or points[i][1] < ORIGIN[1] - PADDING[1] or points[i][1] > ORIGIN[1] + RANGE[1] + PADDING[1] or np.random.rand() < reset_probability:
             coors = [np.random.rand() * (RANGE[0] + 2 * PADDING[0]) + (ORIGIN[0] - PADDING[0]), np.random.rand() * (RANGE[1] + 2 * PADDING[1]) + (ORIGIN[1] - PADDING[1]), 0, 0]
             points[i] = coors
             new_points[i] = coors
@@ -236,5 +248,7 @@ while True:
 
     points = np.array(new_points)
 
+
     clock.tick(60)
     pygame.display.flip()
+    print("FPS: ", round(clock.get_fps(), 2), end="\r")
