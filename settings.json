@@ -1,0 +1,22 @@
+{
+    "title": "Differential Equation Simulation",
+    "screen": {
+        "width": 1920,
+        "height": 1200,
+        "scale": [100, 100],
+        "origin": [0, 0],
+        "padding": [1, 1]
+    },
+    "simulation": {
+        "time_step": 0.02,
+        "point_reset_probability": 0.01,
+        "point_count": 10000
+    },
+    "colors": {
+        "background": [0, 0, 0],
+        "dimming_factor": 0.2,
+        "base_point": [255, 0, 0],
+        "fast_point": [0, 0, 255],
+        "axes": [255, 255, 255, 100]
+    }
+}
