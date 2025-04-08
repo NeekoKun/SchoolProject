@@ -10,13 +10,15 @@
     "simulation": {
         "time_step": 0.02,
         "point_reset_probability": 0.01,
-        "point_count": 10000
+        "point_count": 5000,
+        "curl_resolution": [192, 120]
     },
     "colors": {
         "background": [0, 0, 0],
         "dimming_factor": 0.2,
         "base_point": [255, 0, 0],
         "fast_point": [0, 0, 255],
+        "tracking_point": [0, 255, 0],
         "axes": [255, 255, 255, 100]
     }
 }

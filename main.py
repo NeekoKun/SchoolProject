@@ -1,12 +1,15 @@
+from sympy import symbols, diff, lambdify
 import multiprocessing as mp
 import numpy as np
 import pygame
+import tqdm
 import json
 
 class DifferentialEquationRenderer:
     def __init__(self, settings=None):
         self.initialize_settings(settings)
 
+        self.frame = 0
         self.points = np.random.rand(self.point_count, 4)
         self.points[:, 0] = self.points[:, 0] * self.RANGE[0] + self.ORIGIN[0]
         self.points[:, 1] = self.points[:, 1] * self.RANGE[1] + self.ORIGIN[1]
@@ -27,12 +30,14 @@ class DifferentialEquationRenderer:
             self.dt = data["simulation"]["time_step"]
             self.reset_probability = data["simulation"]["point_reset_probability"]
             self.point_count = data["simulation"]["point_count"]
+            self.curl_resolution = data["simulation"]["curl_resolution"]
 
             self.background_color = data["colors"]["background"]
             self.dimming_factor = data["colors"]["dimming_factor"]
             self.point_base_color = data["colors"]["base_point"]
             self.point_fast_color = data["colors"]["fast_point"]
             self.axes_color = data["colors"]["axes"]
+            self.tracking_point_color = data["colors"]["tracking_point"]
 
         pygame.display.init()
         pygame.display.set_caption("Differential Equation Renderer")
@@ -49,24 +54,41 @@ class DifferentialEquationRenderer:
         self.clock = pygame.time.Clock()
         self.screen.fill(self.background_color)
 
-        self.background_layer = pygame.Surface(self.SIZE)
+        self.curl_layer       = pygame.Surface(self.SIZE, pygame.SRCALPHA)
+        self.background_layer = pygame.Surface(self.SIZE, pygame.SRCALPHA)
         self.axes_layer       = pygame.Surface(self.SIZE, pygame.SRCALPHA)
         self.tracking_layer   = pygame.Surface(self.SIZE, pygame.SRCALPHA)
 
         self.dimming_surface = pygame.Surface(self.SIZE, pygame.SRCALPHA)
         self.dimming_surface.fill((self.background_color[0], self.background_color[1], self.background_color[2], int(self.dimming_factor * 255)))
     
+        self.x, self.y = symbols('x y')
+
+        self.P = self.y
+        self.Q = self.x
+
+        self.dPdx = lambdify((self.x, self.y), self.P)
+        self.dQdy = lambdify((self.x, self.y), self.Q)
+
+        self.curl = lambdify((self.x, self.y), diff(self.Q, self.x) - diff(self.P, self.y))
+
     def equation(self, x, y, dx, dy):
-        d2y = 0
-        d2x = 0
-        a = x * x + 2 * y - 3
-        b = y * y + 2 * x
-        dy = np.copysign(np.sqrt(abs(a)), a)
-        dx = np.copysign(np.sqrt(abs(b)), b)
-        dy += d2y * self.dt
-        dx += d2x * self.dt
+        dx = self.dPdx(x, y)
+        dy = self.dQdy(x, y)
         return np.array([x + dx*self.dt, y + dy*self.dt, dx, dy])
 
+    def update_curl(self):
+        self.curl_layer.fill((0, 0, 0, 0))
+
+        for i in range(self.curl_resolution[0]):
+            for j in range(self.curl_resolution[1]):
+                x = i * (self.RANGE[0] / self.curl_resolution[0]) + self.ORIGIN[0]
+                y = j * (self.RANGE[1] / self.curl_resolution[1]) + self.ORIGIN[1]
+                curl = int(255 * np.arctan(self.curl(x, y)) / np.pi)
+                coors = [x, y, 0, 0]
+                coors = self.coors_to_screen(coors)
+                color = (curl, 0, 0) if curl > 0 else (0, 0, -curl)
+                pygame.draw.circle(self.curl_layer, color, (int(coors[0]), int(coors[1])), 2)
 
     def update(self, in_points):
         new_points = []
@@ -111,12 +133,8 @@ class DifferentialEquationRenderer:
 
         for tracking_point in in_tracking_points:
             for i in range(len(tracking_point) - 1):
-                coors1 = [(tracking_point[i][0]       - self.ORIGIN[0]) * self.WIDTH / self.RANGE[0], self.WIDTH - (tracking_point[i][1]       - self.ORIGIN[1]) * self.HEIGHT / self.RANGE[1]]
-                coors2 = [(tracking_point[i+1][0]     - self.ORIGIN[0]) * self.WIDTH / self.RANGE[0], self.WIDTH - (tracking_point[i+1][1]     - self.ORIGIN[1]) * self.HEIGHT / self.RANGE[1]]
-                speed = np.sqrt((coors1[0] - coors2[0])**2 + (coors1[1] - coors2[1])**2)
-                point = (int(coors1[0]), int(coors1[1]))
-                new_point = (int(coors2[0]), int(coors2[1]))
-                pygame.draw.line(self.tracking_layer, (100, 200, 100), point, new_point, max(int(speed), 1))
+                coors1, coors2, color, speed = self.get_draw_data(tracking_point[i], tracking_point[i+1])
+                pygame.draw.line(self.tracking_layer, self.tracking_point_color, coors1, coors2, max(int(speed), 1))
 
     def coors_to_screen(self, coors):
         coors = np.array(coors)
@@ -199,6 +217,7 @@ class DifferentialEquationRenderer:
         moved = True
         paused = False
         show_ui = True
+        show_curl = True
 
         while True:
             for event in pygame.event.get():
@@ -211,6 +230,8 @@ class DifferentialEquationRenderer:
                     elif event.key == pygame.K_c:
                         self.ORIGIN = [-self.RANGE[0] / 2, -self.RANGE[1] / 2]
                         moved = True
+                    elif event.key == pygame.K_g:
+                        show_curl = not show_curl
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     if event.button == 1 and self.pause_button.collidepoint(event.pos):
                         paused = not paused
@@ -230,16 +251,18 @@ class DifferentialEquationRenderer:
                         self.ORIGIN[0] += (self.RANGE[0] / 10) * (zoom_x / self.WIDTH)
                         self.ORIGIN[1] += (self.RANGE[1] / 10) * ((self.HEIGHT - zoom_y) / self.HEIGHT)
                         self.RANGE = [self.RANGE[0] * 0.9, self.RANGE[1] * 0.9]
+                        self.PADDING = [self.PADDING[0] * 0.9, self.PADDING[1] * 0.9]
                         moved = True
                     if event.button == 5 and not paused: # Scroll Down: Zoom out
                         """
-                        Zoom In:
+                        Zoom Out:
                         The Range beecomes 110% of the original range
                         """
                         zoom_x, zoom_y = pygame.mouse.get_pos()
                         self.ORIGIN[0] -= (self.RANGE[0] / 10) * (zoom_x / self.WIDTH)
                         self.ORIGIN[1] -= (self.RANGE[1] / 10) * ((self.HEIGHT - zoom_y) / self.HEIGHT)
                         self.RANGE = [self.RANGE[0] * 1.1, self.RANGE[1] * 1.1]
+                        self.PADDING = [self.PADDING[0] * 1.1, self.PADDING[1] * 1.1]
                         moved = True
                 if event.type == pygame.MOUSEBUTTONUP and not paused:
                     if event.button == 2:
@@ -268,11 +291,15 @@ class DifferentialEquationRenderer:
                 self.display(self.points, new_points)
                 self.display_tracking_points(self.tracking_points)
                 if moved:
+                    if show_curl:
+                        self.update_curl()
                     self.display_axes()
                     moved = False
 
             # Blit background and Axix
             self.screen.blit(self.background_layer, (0, 0))
+            if show_curl:
+                self.screen.blit(self.curl_layer, (0, 0))
             if show_ui:
                 self.screen.blit(self.axes_layer, (0, 0))
                 self.screen.blit(self.tracking_layer, (0, 0))
@@ -282,6 +309,7 @@ class DifferentialEquationRenderer:
 
 
             self.clock.tick(60)
+            self.frame += 1
             pygame.display.flip()
             print("FPS: ", round(self.clock.get_fps(), 2), end="\r")
 
