@@ -1,8 +1,7 @@
-from sympy import symbols, diff, lambdify
+from sympy import symbols, diff, lambdify, sin, cos
 import multiprocessing as mp
 import numpy as np
 import pygame
-import tqdm
 import json
 
 class DifferentialEquationRenderer:
@@ -14,6 +13,18 @@ class DifferentialEquationRenderer:
         self.points[:, 0] = self.points[:, 0] * self.RANGE[0] + self.ORIGIN[0]
         self.points[:, 1] = self.points[:, 1] * self.RANGE[1] + self.ORIGIN[1]
         self.tracking_points = []
+
+        # Initialize di Vector Field equations
+        self.x, self.y = symbols('x y')
+
+        self.P = cos(self.x) * sin(self.y)
+        self.Q = sin(self.y)
+
+        self.dPdx = lambdify((self.x, self.y), self.P)
+        self.dQdy = lambdify((self.x, self.y), self.Q)
+
+        self.curl = lambdify((self.x, self.y), diff(self.Q, self.x) - diff(self.P, self.y))
+        self.divergence = lambdify((self.x, self.y), diff(self.P, self.x) + diff(self.Q, self.y))
 
     def initialize_settings(self, settings):
         if settings is None:
@@ -39,38 +50,36 @@ class DifferentialEquationRenderer:
             self.axes_color = data["colors"]["axes"]
             self.tracking_point_color = data["colors"]["tracking_point"]
 
+        # Pygame Settings
         pygame.display.init()
         pygame.display.set_caption("Differential Equation Renderer")
         pygame.font.init()
+
+        self.screen = pygame.display.set_mode(self.SIZE)
+        self.clock = pygame.time.Clock()
+        
+        self.background_layer = pygame.Surface(self.SIZE, pygame.SRCALPHA)
+        self.curl_layer       = pygame.Surface(self.SIZE, pygame.SRCALPHA)
+        self.divergence_layer = pygame.Surface(self.SIZE, pygame.SRCALPHA)
+        self.axes_layer       = pygame.Surface(self.SIZE, pygame.SRCALPHA)
+        self.tracking_layer   = pygame.Surface(self.SIZE, pygame.SRCALPHA)
+        self.UI_layer         = pygame.Surface(self.SIZE, pygame.SRCALPHA)
+        self.dimming_surface  = pygame.Surface(self.SIZE, pygame.SRCALPHA)
+
+        # UI stuff
         self.tick_font = pygame.font.SysFont('Arial', 15)
+        self.UI_font   = pygame.font.SysFont('Arial', 20)
         self.pause_button = pygame.Rect(self.WIDTH - 50, 10, 40, 40)
 
+        # Colors
         self.point_r_diff = self.point_fast_color[0] - self.point_base_color[0]
         self.point_g_diff = self.point_fast_color[1] - self.point_base_color[1]
         self.point_b_diff = self.point_fast_color[2] - self.point_base_color[2]
         self.point_color_diff = np.array([self.point_r_diff, self.point_g_diff, self.point_b_diff])
         
-        self.screen = pygame.display.set_mode(self.SIZE)
-        self.clock = pygame.time.Clock()
         self.screen.fill(self.background_color)
-
-        self.curl_layer       = pygame.Surface(self.SIZE, pygame.SRCALPHA)
-        self.background_layer = pygame.Surface(self.SIZE, pygame.SRCALPHA)
-        self.axes_layer       = pygame.Surface(self.SIZE, pygame.SRCALPHA)
-        self.tracking_layer   = pygame.Surface(self.SIZE, pygame.SRCALPHA)
-
-        self.dimming_surface = pygame.Surface(self.SIZE, pygame.SRCALPHA)
         self.dimming_surface.fill((self.background_color[0], self.background_color[1], self.background_color[2], int(self.dimming_factor * 255)))
     
-        self.x, self.y = symbols('x y')
-
-        self.P = self.y
-        self.Q = self.x
-
-        self.dPdx = lambdify((self.x, self.y), self.P)
-        self.dQdy = lambdify((self.x, self.y), self.Q)
-
-        self.curl = lambdify((self.x, self.y), diff(self.Q, self.x) - diff(self.P, self.y))
 
     def equation(self, x, y, dx, dy):
         dx = self.dPdx(x, y)
@@ -89,6 +98,19 @@ class DifferentialEquationRenderer:
                 coors = self.coors_to_screen(coors)
                 color = (curl, 0, 0) if curl > 0 else (0, 0, -curl)
                 pygame.draw.circle(self.curl_layer, color, (int(coors[0]), int(coors[1])), 2)
+
+    def update_divergence(self):
+        self.divergence_layer.fill((0, 0, 0, 0))
+
+        for i in range(self.curl_resolution[0]):
+            for j in range(self.curl_resolution[1]):
+                x = i * (self.RANGE[0] / self.curl_resolution[0]) + self.ORIGIN[0]
+                y = j * (self.RANGE[1] / self.curl_resolution[1]) + self.ORIGIN[1]
+                divergence = int(255 * np.arctan(self.divergence(x, y)) / np.pi)
+                coors = [x, y, 0, 0]
+                coors = self.coors_to_screen(coors)
+                color = (divergence, 0, 0) if divergence > 0 else (0, 0, -divergence)
+                pygame.draw.circle(self.divergence_layer, color, (int(coors[0] + self.WIDTH / (2 * self.curl_resolution[0])), int(coors[1] + self.WIDTH / (2 *self.curl_resolution[1]))), 2)
 
     def update(self, in_points):
         new_points = []
@@ -120,6 +142,15 @@ class DifferentialEquationRenderer:
         color = self.point_base_color + color_coefficient * self.point_color_diff
         return coors1, coors2, color, speed
 
+    def coors_to_screen(self, coors):
+        coors = np.array(coors)
+        coors[0] = (coors[0] - self.ORIGIN[0]) * self.WIDTH / self.RANGE[0]
+        coors[1] = self.HEIGHT - (coors[1] - self.ORIGIN[1]) * self.HEIGHT / self.RANGE[1]
+        return coors
+
+    def round_to_nearest(self, value, step):
+        return int(round(value + step - 1) // step * step)
+
     def display(self, in_points, new_in_points):
         self.background_layer.blit(self.dimming_surface, (0, 0))
 
@@ -135,15 +166,6 @@ class DifferentialEquationRenderer:
             for i in range(len(tracking_point) - 1):
                 coors1, coors2, color, speed = self.get_draw_data(tracking_point[i], tracking_point[i+1])
                 pygame.draw.line(self.tracking_layer, self.tracking_point_color, coors1, coors2, max(int(speed), 1))
-
-    def coors_to_screen(self, coors):
-        coors = np.array(coors)
-        coors[0] = (coors[0] - self.ORIGIN[0]) * self.WIDTH / self.RANGE[0]
-        coors[1] = self.HEIGHT - (coors[1] - self.ORIGIN[1]) * self.HEIGHT / self.RANGE[1]
-        return coors
-
-    def round_to_nearest(self, value, step):
-        return int(round(value + step - 1) // step * step)
 
     def display_axes(self):
         # Display the Axes
@@ -206,6 +228,33 @@ class DifferentialEquationRenderer:
         elif ax_width < self.WIDTH / 2 and ax_height > self.HEIGHT / 2:   
             self.axes_layer.blit(zero_text, (ax_width + 20, ax_height - 30))
 
+    def display_display_status(self):
+        self.UI_layer.fill((0, 0, 0, 0))
+        fps_text = self.tick_font.render(f"FPS: {round(self.clock.get_fps(), 2)}", True, (255, 255, 255))
+
+        if self.show_divergence:
+            divergence_text = self.tick_font.render("Divergence: ON", True, (0, 255, 0))
+        else:
+            divergence_text = self.tick_font.render("Divergence: OFF", True, (255, 0, 0))
+
+        if self.show_curl:
+            curl_text = self.tick_font.render("Curl: ON", True, (0, 255, 0))
+        else:
+            curl_text = self.tick_font.render("Curl: OFF", True, (255, 0, 0))
+
+        curl_text_rect = curl_text.get_rect(topleft=(10, 10))
+        divergence_text_rect = divergence_text.get_rect(topleft=(curl_text_rect.width + 20, 10))
+        fps_text_rect = fps_text.get_rect(center=(self.WIDTH - 100, 20))
+
+        self.UI_layer.blit(curl_text, curl_text_rect)
+        self.UI_layer.blit(divergence_text, divergence_text_rect)
+        self.UI_layer.blit(fps_text, fps_text_rect)
+
+        if self.frame % 60 == 0:
+            print("FPS: ", round(self.clock.get_fps(), 2), end="\r")
+
+
+
     def add_point(self, x, y):
         coors = [np.array([x, y, 0, 0])]
 
@@ -217,7 +266,8 @@ class DifferentialEquationRenderer:
         moved = True
         paused = False
         show_ui = True
-        show_curl = True
+        self.show_curl = True
+        self.show_divergence = True
 
         while True:
             for event in pygame.event.get():
@@ -227,11 +277,13 @@ class DifferentialEquationRenderer:
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_h:
                         show_ui = not show_ui
-                    elif event.key == pygame.K_c:
+                    elif event.key == pygame.K_o: ## Center on Origin
                         self.ORIGIN = [-self.RANGE[0] / 2, -self.RANGE[1] / 2]
                         moved = True
-                    elif event.key == pygame.K_g:
-                        show_curl = not show_curl
+                    elif event.key == pygame.K_c: ## Show Curl
+                        self.show_curl = not self.show_curl
+                    elif event.key == pygame.K_d: ## Show Divergence
+                        self.show_divergence = not self.show_divergence
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     if event.button == 1 and self.pause_button.collidepoint(event.pos):
                         paused = not paused
@@ -291,27 +343,31 @@ class DifferentialEquationRenderer:
                 self.display(self.points, new_points)
                 self.display_tracking_points(self.tracking_points)
                 if moved:
-                    if show_curl:
+                    if self.show_curl:
                         self.update_curl()
+                    if self.show_divergence:
+                        self.update_divergence()
                     self.display_axes()
                     moved = False
+                self.display_display_status()
 
             # Blit background and Axix
             self.screen.blit(self.background_layer, (0, 0))
-            if show_curl:
+            if self.show_curl:
                 self.screen.blit(self.curl_layer, (0, 0))
+            if self.show_divergence:
+                self.screen.blit(self.divergence_layer, (0, 0))
             if show_ui:
                 self.screen.blit(self.axes_layer, (0, 0))
                 self.screen.blit(self.tracking_layer, (0, 0))
+                self.screen.blit(self.UI_layer, (0, 0))
                 pygame.draw.rect(self.screen, (200, 200, 200), self.pause_button) if paused else pygame.draw.rect(self.screen, (100, 100, 100), self.pause_button)
 
             self.points = np.array(new_points)
 
-
             self.clock.tick(60)
             self.frame += 1
             pygame.display.flip()
-            print("FPS: ", round(self.clock.get_fps(), 2), end="\r")
 
 if __name__ == "__main__":
     solver = DifferentialEquationRenderer()
