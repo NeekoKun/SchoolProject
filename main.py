@@ -8,23 +8,23 @@ class DifferentialEquationRenderer:
     def __init__(self, settings=None):
         self.initialize_settings(settings)
 
-        self.frame = 0
+        self.t = 0
         self.points = np.random.rand(self.point_count, 4)
         self.points[:, 0] = self.points[:, 0] * self.RANGE[0] + self.ORIGIN[0]
         self.points[:, 1] = self.points[:, 1] * self.RANGE[1] + self.ORIGIN[1]
         self.tracking_points = []
 
         # Initialize di Vector Field equations
-        self.x, self.y = symbols('x y')
+        self.x, self.y, self.t = symbols('x y t')
 
-        self.P = cos(self.x) * sin(self.y)
-        self.Q = sin(self.y)
+        self.P = self.x * sin(self.t / 10)
+        self.Q = self.y * sin(self.t / 10)
 
-        self.dPdx = lambdify((self.x, self.y), self.P)
-        self.dQdy = lambdify((self.x, self.y), self.Q)
+        self.dPdx = lambdify((self.x, self.y, self.t), self.P)
+        self.dQdy = lambdify((self.x, self.y, self.t), self.Q)
 
-        self.curl = lambdify((self.x, self.y), diff(self.Q, self.x) - diff(self.P, self.y))
-        self.divergence = lambdify((self.x, self.y), diff(self.P, self.x) + diff(self.Q, self.y))
+        self.curl = lambdify((self.x, self.y, self.t), diff(self.Q, self.x) - diff(self.P, self.y))
+        self.divergence = lambdify((self.x, self.y, self.t), diff(self.P, self.x) + diff(self.Q, self.y))
 
     def initialize_settings(self, settings):
         if settings is None:
@@ -80,10 +80,12 @@ class DifferentialEquationRenderer:
         self.screen.fill(self.background_color)
         self.dimming_surface.fill((self.background_color[0], self.background_color[1], self.background_color[2], int(self.dimming_factor * 255)))
     
+        self.frame = 0
+
 
     def equation(self, x, y, dx, dy):
-        dx = self.dPdx(x, y)
-        dy = self.dQdy(x, y)
+        dx = self.dPdx(x, y, self.frame)
+        dy = self.dQdy(x, y, self.frame)
         return np.array([x + dx*self.dt, y + dy*self.dt, dx, dy])
 
     def update_curl(self):
@@ -93,7 +95,7 @@ class DifferentialEquationRenderer:
             for j in range(self.curl_resolution[1]):
                 x = i * (self.RANGE[0] / self.curl_resolution[0]) + self.ORIGIN[0]
                 y = j * (self.RANGE[1] / self.curl_resolution[1]) + self.ORIGIN[1]
-                curl = int(255 * np.arctan(self.curl(x, y)) / np.pi)
+                curl = int(255 * np.arctan(self.curl(x, y, self.frame)) / np.pi)
                 coors = [x, y, 0, 0]
                 coors = self.coors_to_screen(coors)
                 color = (curl, 0, 0) if curl > 0 else (0, 0, -curl)
@@ -106,7 +108,7 @@ class DifferentialEquationRenderer:
             for j in range(self.curl_resolution[1]):
                 x = i * (self.RANGE[0] / self.curl_resolution[0]) + self.ORIGIN[0]
                 y = j * (self.RANGE[1] / self.curl_resolution[1]) + self.ORIGIN[1]
-                divergence = int(255 * np.arctan(self.divergence(x, y)) / np.pi)
+                divergence = int(255 * np.arctan(self.divergence(x, y, self.frame)) / np.pi)
                 coors = [x, y, 0, 0]
                 coors = self.coors_to_screen(coors)
                 color = (divergence, 0, 0) if divergence > 0 else (0, 0, -divergence)
@@ -348,7 +350,7 @@ class DifferentialEquationRenderer:
                     if self.show_divergence:
                         self.update_divergence()
                     self.display_axes()
-                    moved = False
+                    #moved = False
                 self.display_display_status()
 
             # Blit background and Axix
